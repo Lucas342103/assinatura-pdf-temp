@@ -1,0 +1,577 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Assinar Documento - Fluxo de Etapas</title>
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0"> 
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        padding: 10px;
+        margin: 0;
+    }
+    .main-container {
+        max-width: 800px;
+        margin: 0 auto; 
+    }
+    .step-content {
+        margin-bottom: 20px;
+        padding: 15px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        background-color: #f9f9f9;
+        z-index: 20; /* Garante que os controles fiquem acima do PDF */
+        position: relative; /* Necessário para z-index funcionar */
+    }
+    /* Estilos dos botões */
+    button, #baixar, #uploadBtn, #drawBtn {
+        margin: 5px 5px 5px 0;
+        padding: 10px 20px;
+        font-size: 1em;
+        cursor: pointer;
+        border-radius: 4px;
+        border: 1px solid #0056b3;
+        background-color: #007bff;
+        color: white;
+    }
+    /* Novo estilo para botão desabilitado */
+    button:disabled, #baixar:disabled {
+        background-color: #ccc;
+        border-color: #999;
+        cursor: not-allowed;
+        color: #666;
+    }
+    .secondary-btn {
+        background-color: #f0f0f0;
+        color: #333;
+        border: 1px solid #ccc;
+    }
+    /* Estilos do PDF e Assinatura */
+    #pdfCanvas {
+        border: 1px solid #ccc;
+        width: 100%; 
+        height: auto;
+        display: block;
+        cursor: crosshair; 
+        touch-action: manipulation;
+    }
+    #signature {
+        position: absolute;
+        display: none;
+        user-select: none;
+        z-index: 10; /* Abaixo dos controles da etapa, mas acima do canvas */
+        pointer-events: none; 
+    }
+    #drawingCanvasContainer, #signerNameContainer {
+        padding: 15px;
+        border: 1px solid #eee;
+        border-radius: 4px;
+        margin-top: 10px;
+    }
+    #signatureCanvas {
+        border: 1px solid #000;
+        cursor: crosshair;
+        background-color: white;
+        touch-action: none; 
+        width: 100%; 
+        max-width: 300px; 
+        height: 150px;
+        display: block;
+    }
+    input[type="text"] {
+        width: 95%;
+        padding: 10px;
+        margin-top: 5px;
+        margin-bottom: 15px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+    }
+    /* O canvas-container agora é o ponto de referência para a assinatura */
+    #canvas-container {
+        position: relative;
+        padding: 0; 
+        margin-bottom: 20px; /* Espaço para o botão Assinar na Etapa 1 */
+    }
+</style>
+</head>
+<body>
+<div class="main-container">
+
+<h2>Processo de Assinatura Digital</h2>
+
+<div id="canvas-container">
+    <canvas id="pdfCanvas"></canvas>
+    <img id="signature" alt="Assinatura" style="display: none;">
+</div>
+<br>
+
+<div id="step1">
+    <h3>1. Iniciar Assinatura</h3>
+    <button onclick="showStep(2)">Assinar Documento</button>
+</div>
+
+<div id="step2" style="display: none;" class="step-content">
+    <h3>2. Identificação</h3>
+    <label for="signerName">Por favor, insira seu **Nome Completo** para identificação no carimbo de assinatura:</label>
+    <input type="text" id="signerName" placeholder="Seu Nome Completo">
+    <button onclick="showStep(3)" id="nextToStep3">Próximo</button>
+    <button onclick="showStep(1)" class="secondary-btn">Voltar</button>
+</div>
+
+<div id="step3" style="display: none;" class="step-content">
+    <h3>3. Escolha do Método</h3>
+    <p>Selecione como deseja gerar a assinatura:</p>
+    
+    <button id="uploadBtn">Enviar Imagem</button>
+    <button id="drawBtn">Desenhar</button>
+    <input type="file" id="signatureInput" accept="image/*" style="display: none;">
+    
+    <div id="drawingCanvasContainer" style="display: none;">
+        <h4>Desenhe sua Assinatura</h4>
+        <canvas id="signatureCanvas" width="300" height="150"></canvas><br>
+        <button id="clearSignature" class="secondary-btn">Limpar</button>
+        <button id="saveDrawing">Usar Assinatura</button>
+    </div>
+    <br>
+    <button onclick="showStep(2)" class="secondary-btn">Voltar</button>
+</div>
+
+<div id="step4" style="display: none;" class="step-content">
+    <h3>4. Posicionamento e Conclusão</h3>
+    
+    <p id="signatureStatus">Clique ou toque no PDF (acima) para posicionar a assinatura.</p>
+    
+    <div class="controls">
+        <h4>Ajustar Tamanho:</h4>
+        <button id="sizeDecrease" class="secondary-btn">- Diminuir</button>
+        <button id="sizeIncrease" class="secondary-btn">+ Aumentar</button>
+    </div>
+    
+    <button id="baixar" disabled>Baixar PDF Assinado</button> <button onclick="showStep(3)" class="secondary-btn">Voltar</button>
+
+</div>
+
+</div> <script>
+const pdfBase64 = "JVBERi0xLjMKMyAwIG9iago8PC9UeXBlIC9QYWdlCi9QYXJlbnQgMSAwIFIKL1Jlc291cmNlcyAyIDAgUgovQ29udGVudHMgNCAwIFI+PgplbmRvYmoKNCAwIG9iago8PC9GaWx0ZXIgL0ZsYXRlRGVjb2RlIC9MZW5ndGggNzM5Mz4+CnN0cmVhbQp4nK09y3IkN3L3+Qoc7AgpQmziVaiqudU0i1RryW6quzlWbMyFmqG0dJBDiRxJa3+UP8Anb+xBsQcdffHN4cOG7/4AZyYelUB3FZtr66DpBLISmQAykcgEQC2+eiVnVS1+gX+klOLslaJ/+f8fv4dK3QBONVNSNMbNtBb3r6rGzqoE3wFczWoX4apxs7oGqJppNUBm1lbivXgVCupGzRpJHwcY2LEikKrrdlYZERoKEH6MfATw7pWZNVWE9KwxkUj4TQ3ARwQGBu4iRMwRgcg2ExE+2rx6sxXHp0o46Aqx/U7021c/Ct9X3wuoc+1MoswSP9h+EJ+d9PPzbr0SX1/1Yt3P+zcLsdqIt6vzq4t+I076zbYX89Xyy36+uOiX25XoL8Rlvz7tF/h7s+1OVgCfewInqytxuVqL+dXF5XoBNVC37jfwHRHZrjv46KQX8GO5AcRt/7nY/iMwKb4OEmo3qxpxnwbAw3dik4thZxq6QEusRCmWqwtGStlm1uiBWICxzxu1S0xBW7ahYYC+RnLdZrNYdturdSeOxbxbLy7erBinrcUxSuQDPEbemGbWNpzb7V/WF4sl9ERH3bPtfv3zShwBuO2Ov1ytu6GpnFDrZsqKRtlI6BlE2RyKqJ9DtGZmlKhbFxEXy9/mi0NE8OMqYR6rMBStjPD+ca3bGiuxlfXZQMi27Uw1sZvvRYDZFKG5D+M8MvcrY2dOQf+1UYj59ohNm2dUp1KkNMh6bf2s+9cZTHmY7KQYotLOqZEOrKzGSYCihY/HEI2aOQuIKiJu/rJe9EIwynJmYTDOopnzhqOGSYzdUs1cHSHsFA7fi8ZbplQLMilWrQwKz+t5AdRXs8Zm9TUjCKogZyarzwqg3rDmqN4yglBfF9xnBfcC7FaleL3RGf9gIGVezwugvi74Ny0jCHNKF/xnBVBf+Sk41LuMf9vOXF7PC2BwdMF/ZRlBqK8L/rMCqG/94pHqncr4d3Zm8npeAPV1wb9rGMF7UauC/6wA6sH06KzeZfyDbsq8nhfA9FMF/41hBKHeFfxnBVAPKt/y+lZm/Ldm5vJ6XgD1ruC/bRhBmN9SFQLkJYhhChGUrDIZFJhdU2A0mRRKqUIMpXQmhwJFcwVGlUmiVFOIokDXMllA2QpZshLEAHV2OUadywIKZ3KMrAQxTCkLmNkmw6hLWbISXBQkOkMcA/QukwUUTxYYvAQx6lIW2zKqaLt0KUtWghjgX+Xmr3K5LKCAdYHBSwDD6VIW0EGdYdSlLFkJYoCaZ2ZQgR5msoAimgKDlyBGXcpSN4wqYIAyFrJkJYhh0THNMFwuCyikLDB4CWDAQlbIAjpZZRiulCUrQYy2kEVLmcmicVEuMEwmi5aukEWDVnJZNGhlLkteghimkEWDVlYZRlPIkpcAhlbow3MMrXNZQCvrAoOXIEZTyoIOPccArSxkyUoQA3S/yTHqXBbQSpNjZCWIYUpZrGVUEaMuZclKAKMC3c+spQatzGQBrZQFBi9BjLqUBbSy4higlYUsWQliVOjdZRgulwW0si4weAl6L7qUBbRSZxh1KUtWghig+5m11KCVmSyglabA4CWIUZeyNA2jilsWVcqSlfhNTeVyDJfL0tJeMsPgJeitqUIWA1pZZRiukCUvQYy2kMWAz8plMaCVdYFhMlmMcoUsBrSSy2JAK3NZ8hLEMKUsoJWZLKCVhSxZCWCAb68zy2/Af81kAa2sCwxeck+7yUIW0ErNMUArC1myEsSocBOWYdS5LKCVNsfIShDDlLKAL9tmGHUpS1YCGI6CORwDtDKTBbRSFhi8BDHqUhbQyopjgFYWsmQliAG6n28L4GcmC2hlXWDwEsBodCkLaKXOMOpSlqwEMVrc+HIM0MpMFtBKW2DwEsSoS1nAx235HkeqQpa8BDFsIYsFrdQZRlvIkpcABqyduSwWtLLKMFwhS16CGG0hiwUfN5NFm1KWrAQxKDyQYTS5LKCVMsfIShDDlLKAVlYZRlPKkpUAhlUU22AYGBLIMEDTCwxeghhNKQtopeYYoJWFLFkJYoDu6xyjzmUBrbQ5RlaCGKaUBXzcNsOoS1myEsCoQfcza2lBKzNZQCtlgcFLEKMuZcGwKscArSxkyUoQA3Tf5RgulwW0si4weAnu+nUpC2ilzjDqUpasxEez2sxaVqCVXJYKtNIWGLwEMepClgp83JZjgFbmsuQliGELWSrQSp1htIUseQlGOVQpC2hlJgtoZSFLVoIYbSkL+LiZLKCVhSxZCWK4mZM5RpPLAlqpcoysBDFMKQtopcswmlKWrAQwKtD9PCgHPm4mC2hlXWDwEsRoSllAKzXHAK0sZMlKEAN03+YYdS4LaKXNMbISxDClLODjthlGXcqSlWBwX2IglmOAVmaygFaqAoOXIEZdyBIzQiHbYnDjfk+7TaMjfAew9daOYNVWfl5qDOMliBTvvXgVChxICDb0boAp5BpIOUBvlAgNBShmfQIYsj4Boq8DkfCbGohZn8DAXYSIuRB2Ira5iDzr04yErn1Y3VG0J489h5B5O/Kh8iYZNK/xwejtbDMTZ1fd8qQ7XywXR0MmZyOOxMVuNH0sGK8olVWDH+5qn3N5i+mj7WotuvP+G2hg3Yt1tzm7Ou/609MvbCP1SMgc9gO44oMhC6S+6tYniwuxuLjs14vuXCwWwFtTS22OpDHIZ7deLM86+HW5HovDawrZgYUNRE8fPt4cn17/8bV495m17z6HnYlVRwb88TG2iB/XSpwWlG1YXn51PL88fS0wzm5qMBK2OQZ8ddRWAv9bfHx6P+ufPl1/+On67rVoZa1gjw0u3tAEn1VpdqdZVk7JMF0l5qcihO6x5bNbwypSs9kNthr2RpGU1hgliQ15KM1uD8bZ7SE/oz2R8JsaiLM7MBBmd2COqwcX8eDZ7cDWNWoqswLbNdNyvO3icgVzTsy35bQdzyHB+qGscJXDdBjlgB4e76/vdqb9GK8Y6IV5v4eLTb9+u/h1dTAnGGat1BQrPs4W54oIYBgy8WyqmKKnDpY/ZULG72RGvXXUi7Pz1RswAL/vTlZFps/ZFj+4T9PNw6w9DKrtT7DRftqhe+4F+oaldBXmYRzmbyQS9yD6DC4EfKgzYn0Ah/ri+wyd1fsP9nz/zGAAfoua086ct7CbxQXTWTLUqfEADsRdg+HfVB/Aob74PkNn9ZH5ne/LEwBOcVaXfy4nXTZ9n7HjLWVjnaXIl58mp9PTRLUhUh9WaNyRUGw7rNAWZnSdVmjcnVBynRbBBMUVOhZgvkDRxwGW/mNPyrT+Y9+Qh8gAek58wR3FndEv8XD0BjypBFFDg/VMa3XpSnhS0c3gIh9i0/ALTPxNrNlKjtkonMwwVyvKbdEhj27XxqnRRV8rEqHGjIof05OH9z/d33z89CC6n/54e3d7/Sg+PIj5w8c/3Ly/9RUfbsT28frj0w8Pj59uRH938+nxfz7evn9g+XvwVyUb93RMJox7OkTjXZxwwMZ3Z4LiuMeCOO4Jlv5jT8oPZGwojXvkJI67hZ5q1DBN8inEJxibcXHcywnqSYXJm4l80FpWteQX7Rv33FjKlvbTjlJ6iHixAp/s8FlSSUmpPsxQ+1myfvjw8PPtfz7ePuwqq++aQVmHrss1zPcFrJKwFCSI4gus6xRt04auU5QVj6Rg9sJoxYY8xJTVFwzK6uGofZ5UgqghpqyelUFZPaOl3nORX6KsRkU3+XA3GD51ICaYY6niMPbnh7sBGuYBbgYGR7qq2ZKsWyYZZo5a1mlsUR4TTRsfthr4o+Moh7Nn/VZvYI+dY8G8TVsx7gJ8OHcYmHKcu+V/XPTrF/Qenoerst7LD/FoHB/LWAzwwSxiDgScX8bi6a6SjnqbkvYQvPeOGXNGwe6E9V+Ep5jbnY/PuIEGU5ySC4CHvEQv8JgXHubrLxabzY4PMSEUbAfwTAkTSh4rfawlTDRVva7a11IyIWEfgocWkpAB3hFyVIDWRz0wqKuCi7KZzzZX5KfgCceDWbfGJ5EH1nctpedrsJTRXpXmLZg+iUcPI4S5LsMsZQo8JFh7w0qkgmcfGho2TIETtikk81ZuCkMMg0c4mKX0rAyW0jNaGl0u8kssJaYBZdGBAe2VluR81/APMogZoyNNB2geb8R3lLZXqZqOAWTVGA1I1RqjW3m1Tx2PEVctZYXHiGt/TGe02seWxtrWPhEz9rWRpL1jrMF+b0puzOdPfd3SAc4x1mCb5yYEs45WgTHitmFt7xKH/Yma6FSYzVNyo0c0wZrTbLz3VFdMboOmOK9uJ+UOKYkxweqK8syj1S2Te1cwPG0zVW3ZVNxTXU+Od+v3AKPVdrJtUNOJto2UU2pg/HHisT7HDH+rx79WkrW906mY25+QG1P9doI10O92vFsM6Hc1VV3RId7R6pa1vVtt9KTcsLZMmJ5winyUuFWsz/dUT5o9Yxsm927blcLwxni1TxmNEYctkRxXIkz5mwnimFmcIO7qybZhzZMT06GuJtuu65mamA6NZG3vfg0KPNV246ZMj2kla3tPtWamZ5c1PNjfjva5DXu/EeIWlucJua2sptrGkwBqvFvoGMBE28rnY8eIK+9yjNgWqzVre/drWKDriW7RDWt7l7jRU+NtYYGeMLl4IMC58bYxwDDRLdYwuXeI5y5fcj6TC1h6jMGbpNB7hFJeIBaA1lvJnM8KZmSVnE8f140NeYg5nyHsm5xPD0d305NKEDXEMhIxQ1AmMHI/loscnc/gYO5mA/bsEjh6FdHnX3Zve9zWdPN+s1llX+ti26T9ySsWgrcK9zAaJDU1xkMaQJcgBSZWQQB0cCXsMIVTKv1q42an6LthFGNfll3vhwVsN0ycBDmcOmwUY3YnwZSYiaR8NiA2lLI7kZOY34ldH5NBeaKIp5HYKHpWhlH0jJYTgos8soVgA4XZeVOOq7aUK3egn85Xzh8+Pv109+la3NyLP3z69MPr4+Nffvll9v7Tzey763+++fjhevb9w8+zbx+PMV6ZkiaF3MMIxH4ouy10KR3njxC6GJkeSXJo0ghUbRg+IlW1tJ0JDQVoGIFQkEYgwKFLA6nYwb4hNgKeFZbZI0bLweQil3qk6Oz6wXqkXES/XK+2q/nqnO77dZjXXfyeLokBePWcXuE1FRhP8COtD0ArVCypYUltFbiX4kjwmIF7LeXrykSaP0KlxqUXVCz+tLWh7J+iCNP7e3G8UOLkgYWlY4QzjxYPYekYS/ZxZh84TFCMcIaCNOQBDuMUSIUxDA0NQx44SUMeYslphuSzh88tFluNEc4yFJtFuDORx5UuBqN34ppZ9nfIQg/WIk8d55OPT002V2OXlVObSKVpTw0NXUZ8pA6jnUGAKLoRiPjEZOoqD0bdCClqYo6nsbmIsYt8pnmvTpRV89PVJUxTukXa/77LLkpOTn5PCNZ57e8oVqYydFABP553pECUK57vv0qb9ck9bOUqvH+Q+ghPcbvUhSGcWcE/8FGCqjAvYgGe35H0cYBpkxVJgRNtoZNDQx5KY+PBODYBlcYmEPG/qYE4NoGBuwgRc3xwuYgT0xd7skI/escTKKv23GZ9fpCqRsUE2+LN4hLDoexACZ2Gb9UwEmgLbDuMBJ5gqu1gDRpvG0jYBMWRiAVxJBJMnRhJ+e6NDaWRiJzEsdDQpBtGoxhUPuRsDqQxKaaMJxWnExd5fGTCRYH9Y4PRBVvzyn33pSeHJ5IYBqhbd5er5Vm3yYaIT9FBVYZuyud36BiL50cTRBdaWTfhNQHeTZr2DJGUpl16bMhDSVU8GFUloJIGBCL+t4nK6TWHGIiq4pnjusZFHHkgIM1ncLut95/W/UW/xWv701pAyaTKNfGzk8VmiaZIwI/tevHmanGCWuHLLmEMlp043550k75E4IUOeyLRfnnSr/tfn1FIz0rVxq/WYr0C4yv+oTvf9muxWZ2s+y+MTZkF/pGK/H91IhbLkyvkPaVSp5jEs6Eh+Xq1XMx/u1wcxKXV8bN9dmNve+ji4qI0tDjvL59xovwyNjTWOC3lkcy6YEwyU+FE4qfWDhHM2PgV7OJRCevG+QNuZrpR5WhzzJrFHM16gQ4jPTJxVYzH7laMDr0wDlpZtUo2rW4PEFe7+OLAZffb5hBRMRTov3iz7jaL6dmCF/hM1szpajmtW1GgoZ13n1mDxw5V1RzVcujQ3LrfJ58zmjFcKqQeFge6nxksRYKiGYsF0YwlmCxQJOVtU2wombHISTRkcXGIVi+3iNxecl8jGrTC3uZLFhd53KzFdWYwbJjuw6c9/rR+RlUxqGkMN24LMIdn6w4Woflqddmvu+3ibSe6s/XqQJsRV6UXmrbIyWDbzq46bB2Wsy+sVBVYD8YRX0njl8nAgQ3Gd1oGhsVicRDPL7V0senB+uxfgfc2iqf0cZodbuzwPD2s9JmxAx05kmra7kTxXmjuonSDtQE6LWxOtLNo7/RRbaetDuzOtPk/2LtwtYFx4HQjLZg7Wx0k8QssXpT2RSavwhXAvsjkxWHfNXm6dkemdi7327xZGfy2wezkzlYwNBJPl0ZIUTp0MDsWTETbDGbHgt7XJvptdHlJR78tQNFvC2Dw2yIq7boDEf+bGkh+m2cg+m2eOe74cRGf89tUFR+06b+57E/Q6TpkCdt5R2iqDUlXFV/qj0kXv9pxu/ACVLVTN9K8bSli8VJPCy9qSfd8G8G7Yq0c6F0d2oAXAi9yu5c6VbaR8atDXCjWyN/mQh3anhepNlH+Ax0nvOV30JB4l4k1wO1H7mkMPk80AaWjEpwYkixCyQSEgmQCEkzaG0gFvQ4NDSYgcJKMQHBUksXIrQm3NcznScagsFW5+8RFjiYhejiDCaBH3PrnTEC06QfagLhqvNAKxFb2moFQeagdCCy82BLEZg7U1LAIvcAUBN/j0AaiHC80BkmMA7Wz8tPwb7YGsR8ObC9K9QJ7ECU60CAEh2LEIPCV+J5Ca4gblRJ1GPYcSYe9JXIOQ1wJqjD8FcwBFlh6iO1ugCVmECIpPE9Vi9iQh5JH4MHoEXjIewGeSPhNDUSPIDBwFyFijrsUXMQsIG0dPd1BkbLVRQeqv3ufaP8QNHRFBNMB4fv/lwAOPg2BhxoHtg7U1JboMHZCeGR6Xkh6wo61djWtSXjjGY+bD808ux2pixaeNwnWf5GaeEHsBW/shwtQL3C1rH81ZzL0BTuvF0a4rLV4uu5wl4UuT+NhhfDVS+NADT1QyJp9qRMD+tHUnIND40BWFS0/79BUgdnU1kH7IkWGeWjngH2RN5RDO2OhIG59BisYrVFpuvy8ATtv3ABRVH+wggY2tWSVEuyjip4UPk+immgFAxStYACDFQwQGbdAJPw2we56u+cZiFbQM8fNKBfxmX0RPtth6piNPrna0mu0J6uLxbJ7NrRNBLQdIttv+/VmlSYEPu0z9KV//Adh5fA2zf5T6WjijL8lNHC2utrCpMFHZvGO1vq3zXYxBxijTN36rJs2mIGapmfJ+AqKLqbVA3sRfoY9XFxdzdl7253DcrJdbbvzw3iKJAae4Ie2XwyWz4+s5+Q+TbwdzqpCrzH4hY/KhMtKl/1mJd6scVDfffa7s3efT3JFpz7xmZuQDkrnPWSDdxESNwGOU3eMG6XpvOQOO92mF/M/nc+vzg/iCl9slHv50p5y4ivAz/GlwYjhgl7w1Z329BrzASzh83Q4HLss0WNWamApwLssFTO+0bj1sUpGluZXb7qz/uLdZxfmGWbIQ2z3MTPiCdBbEKypr7cn/bvP3q7On2kofjk0JGHCKq5NNZuzAWaic4OXDG8ygKW1DJaU/JYINXQ3gBlereNWNsCKtlKBlKZXBWJDHkqG14PR8HrIG1tPJPzWMWxPoGcgGN7AHLfcXMSJiDu+EAz8NfRQLg336uISVrglvhABc9AblOzZ6F1nNXCk8BTg/dBFBIeZRgYaz+9W4S3m4QVw8mzprSlWT+0mtcdnceXQQoShq1y6U6Qcvbo43ob2T46ONRKWhNRIhLNGjJF4cGq8EatgdzneCD4B5DTrqwBnjeD0VpoeQgsORGbWx/YKbeGF0NkbPM0d1gal7Be1Ljmp6H3YYdQ8PGofKkWvcNL5dcN46/xr9H0ZxtjPlK6j4uZMjTsHxqWjOqfrHnY3WbeGvZHkaIW4TNMGjY+aV6qp7woM88gBomPxg8brhl76uxtgi9uoQErDjLYuanyAosYHMGh8gPzzMp5I+E0NJI33DESN98xxk8FFTPEm462+svFVk8XydLW+6H79d9DvdX9OOaiN6Fb4/Mpqsy10Gm1zw2aHhzOdlnQ9EElvFtsrshC0FcWcXfI98KleHJ5IL8Aoel0lDcbXexWnSCv0CSzSHS3SiTdwra0aqAU4p0ZvmxpOrTv/7WuxmF8MXqGhTFuiE+CcTvDaGB0/4zkhfPnO2oFQgHNC+Bge2p+B0N/DCJzMxJt5RgyjdjAfhr73cE4MXwprmv1ciXRFcsJZ1i09lY5fWtxp0oe3Tzcf//pfD+zrMCYMO7Oo1MX7K0O/7a8MfbG/Msi2p5JrT9LipE2l6gW11P7IVYBUfBDHFyhT+fueCaZXIAMpfC0b836+oQBFLQ5g0OIA+Vuankj4XYXblkGplT90GSBijpsBLuLEug36oyy9T2t9dC39YYONWK0XZ4slpsw3mTZrfNfADNocYK7NtB/3dj08dDPno1aROzLg+CADHsE/Xr3hu2+85g6rC0Ole+jHy/WK/Q2GIT0gMXmQ+Aswdmmlkj7ji7f1MxzitStYMw9hsZIGl/IDWXyz7x627zJcYb1tXZ4e3ex211CPp6IVuFxGyrpxGGAxsqpUDb+krSRMOgVOq1SNqc2ezhwIwSfH6ZtMOcI0TMqRJmk5o8Ns1/7P5wRIzlrHlKMJB4QjSH9wJRCq6TxuaKWOp4P9S2fhqK6/+UdA+Ksi+H34wzFBDYOOUMN3EdLpz+ZEdploE0qBf+4A73NQsp5262/QVaLFLtME5d83TJoQYOb10N/JyAdawX5CtmGgRd73EQf1tt01WbXDP2iTBsWDaUw8GFgBx7FJTocXaBiQSvkrGhGUlDgPcSJfFIJIBKQAN0Exvu11n/LY9H1IcId7KP4NO2o3PmhXpRe/AqeDSBODYfyhdYloZKC6E7BN/eayn/92upivaHtBj6CI9epk9XbBz/iEt8ZofxY7w4PcWjkVdy3r5XY9x21Kf4EblWdiHj4LHxdOGHxbuTqNZaP8g2a+cQ9VtL8a9Yr3hBzw71BghjO2svuXmbLT4KLbYvRY/Js4788Wm/N494JhDL2Ef9Tp7eJslR+MxVejW7wEo+naggfvAKwpakEgXpnDpLFG5iIgw0gGWBPPdwlUFIryVGDZxo23b8EDyaklKPq0BPhVh773P4lyih1KrwUeII5C5BA5ZSKNTzIwlrhQmDoq5tUGOueb+fnVZvGWdqr02oXPsLC/HhS8Wxv/eBX9kSMPZqshveeLdB/Ez9d3D4/i+ofHhz/e3l9/oBeUPj3efvvTp4cncfvx/e2Hm4+fbp7E08O3jzfiQfzwePNXRHr6dCOebh5/vgXov/Gj9d+p+osmnfqx+Ac6hsFLQWA/eCkGTF0SYm/UVRGIgxfX9DB4EVT+2KB3jGhQotcUBy8wEIfPanpiJQ50NgXY9BimSxzGYmoRlTDpuIgpFYbn1xs2dPiHx8BWw0DBZuR0sZmvMn+R7moPA8LqiEKD+kn7m3vo+aenB7xKBiY73ToSQjavTfVacpuNL3rDEp0+Xj58un4S390+vb++fRLf3zzewMBef4CyH27ursXXtz/fgKuMV9N+hJ+z9w/3s28fhbh8+AVQP4hv/0ksT28uv7z8l9jG/wLE22n2CmVuZHN0cmVhbQplbmRvYmoKMSAwIG9iago8PC9UeXBlIC9QYWdlcwovS2lkcyBbMyAwIFIgXQovQ291bnQgMQovTWVkaWFCb3ggWzAgMCA1OTUuMjggODQxLjg5XQo+PgplbmRvYmoKNSAwIG9iago8PC9UeXBlIC9Gb250Ci9CYXNlRm9udCAvVGltZXMtUm9tYW4KL1N1YnR5cGUgL1R5cGUxCi9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nCj4+CmVuZG9iago2IDAgb2JqCjw8L1R5cGUgL0ZvbnQKL0Jhc2VGb250IC9UaW1lcy1Cb2xkCi9TdWJ0eXBlIC9UeXBlMQovRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZwo+PgplbmRvYmoKNyAwIG9iago8PC9UeXBlIC9YT2JqZWN0Ci9TdWJ0eXBlIC9JbWFnZQovV2lkdGggMTY0Ci9IZWlnaHQgMTY0Ci9Db2xvclNwYWNlIFsvSW5kZXhlZCAvRGV2aWNlUkdCIDEgOCAwIFJdCi9CaXRzUGVyQ29tcG9uZW50IDEKL0ZpbHRlciAvRmxhdGVEZWNvZGUKL0RlY29kZVBhcm1zIDw8L1ByZWRpY3RvciAxNSAvQ29sb3JzIDEgL0JpdHNQZXJDb21wb25lbnQgMSAvQ29sdW1ucyAxNjQ+PgovTGVuZ3RoIDM3MT4+CnN0cmVhbQpIidWWXRLCQAiDuUHuf8vcIJKwtb4vL9ZRl09naCH8VP3bJYnoL/YnijZXaL+JNv2SYu7Q9kMItC/EXKQFmGuXdkCk9tjWHs3RD6DE/o3ZHXX6fq6fHN/RaM0ZbbvwkHtKqw+0BEHwOLuniQaivwS/xbJCMThB6mfhPMk9LRuFSNr/ScEsUHVonMPmjpOoHWox+0Tz0onYAkXKpF3yGFyhNfKIXpzRqh3KFAx0yjFaWaH0rVvVmh6qWqHtSFYKJrdHffcU7vUdakbfmSQ71JWCqZo05VHJNU3TLLcLpSlhVHJPj+wUwfSPW/Qo2sPEeX3q5ZYiQ8/59HxSThs087nv3lnVI74F6onvtqkMEo9r7tDougUCjGQmFfd0OnyyaKVQO/R4zF4xTYMrNON+VgA3Db47wR11c7PspinxTKcFGjlX9iBA351ghaYpzU5x1LdCmZLmyQJ3aDYrT1S4HPVumXc0gkuVWN4tEuzQ/7o+fPe1KAplbmRzdHJlYW0KZW5kb2JqCjggMCBvYmoKPDwvRmlsdGVyIC9GbGF0ZURlY29kZSAvTGVuZ3RoIDE0Pj4Kc3RyZWFtCnic+///PwMDAwAO9wL+CmVuZHN0cmVhbQplbmRvYmoKMiAwIG9iago8PAovUHJvY1NldCBbL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSV0KL0ZvbnQgPDwKL0YxIDUgMCBSCi9GMiA2IDAgUgo+PgovWE9iamVjdCA8PAovSTEgNyAwIFIKPj4KPj4KZW5kb2JqCjkgMCBvYmoKPDwKL1Byb2R1Y2VyIChGUERGIDEuNikKL0NyZWF0aW9uRGF0ZSAoRDoyMDI1MTIxMTA4MzUwOCkKPj4KZW5kb2JqCjEwIDAgb2JqCjw8Ci9UeXBlIC9DYXRhbG9nCi9QYWdlcyAxIDAgUgovT3BlbkFjdGlvbiBbMyAwIFIgL0ZpdEggbnVsbF0KL1BhZ2VMYXlvdXQgL09uZUNvbHVtbgo+PgplbmRvYmoKeHJlZgowIDExCjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwNzU1MSAwMDAwMCBuIAowMDAwMDA4NTQ3IDAwMDAwIG4gCjAwMDAwMDAwMDkgMDAwMDAgbiAKMDAwMDAwMDA4NyAwMDAwMCBuIAowMDAwMDA3NjM4IDAwMDAwIG4gCjAwMDAwMDc3MzYgMDAwMDAgbiAKMDAwMDAwNzgzMyAwMDAwMCBuIAowMDAwMDA4NDY0IDAwMDAwIG4gCjAwMDAwMDg2NzEgMDAwMDAgbiAKMDAwMDAwODc0NiAwMDAwMCBuIAp0cmFpbGVyCjw8Ci9TaXplIDExCi9Sb290IDEwIDAgUgovSW5mbyA5IDAgUgo+PgpzdGFydHhyZWYKODg1MAolJUVPRgo=";
+const DOWNLOAD_FILENAME = "41251213378448000195570010000526611005266190_assinado.pdf";
+const sig = document.getElementById("signature");
+const canvas = document.getElementById("pdfCanvas");
+const signatureCanvas = document.getElementById("signatureCanvas");
+const sigCtx = signatureCanvas.getContext("2d");
+const canvasContainer = document.getElementById("canvas-container");
+const baixarBtn = document.getElementById("baixar"); // Nova referência
+const signatureStatus = document.getElementById("signatureStatus"); // Nova referência
+
+let pdfCanvasDimensions = { width: 0, height: 0, scale: 0 }; 
+let isDrawing = false;
+let currentSignerName = ""; 
+
+const isMobile = window.innerWidth <= 768 || /Mobi|Android/i.test(navigator.userAgent);
+let signatureReady = false; 
+let positionSet = false; // <<< NOVO: Variável de controle de posicionamento
+
+// =================================================================
+// FLUXO DE ETAPAS
+// =================================================================
+
+function showStep(stepNumber) {
+    // Esconde todas as etapas
+    document.getElementById('step1').style.display = 'none';
+    document.getElementById('step2').style.display = 'none';
+    document.getElementById('step3').style.display = 'none';
+    document.getElementById('step4').style.display = 'none';
+    
+    const targetStep = document.getElementById('step' + stepNumber);
+    if (targetStep) {
+        targetStep.style.display = 'block';
+    }
+
+    // Validação de Nome ao ir para o Próximo na Etapa 2
+    if (stepNumber === 3) {
+        currentSignerName = document.getElementById("signerName").value.trim();
+        if (!currentSignerName) {
+            alert("Por favor, digite seu nome completo para prosseguir.");
+            showStep(2); 
+            return;
+        }
+    }
+    
+    // Na Etapa 4, mostramos a assinatura e pedimos o clique
+    if (stepNumber === 4) {
+        positionSet = false; // Reseta o estado
+        baixarBtn.disabled = true; // Desabilita o botão
+
+        if (!signatureReady) {
+            signatureStatus.textContent = "Erro: Nenhuma assinatura carregada. Por favor, volte à Etapa 3.";
+        } else {
+            signatureStatus.textContent = "Assinatura pronta! Clique ou toque no PDF (acima) para **POSICIONAR** e liberar o download.";
+        }
+    }
+    
+    // Na Etapa 1, ocultamos a assinatura
+    if (stepNumber === 1) {
+        sig.style.display = 'none';
+    }
+}
+
+// =================================================================
+// FUNÇÕES DE CONTROLE DE ASSINATURA (ETAPA 3)
+// =================================================================
+
+document.getElementById("uploadBtn").onclick = () => {
+    document.getElementById("signatureInput").click();
+    document.getElementById("drawingCanvasContainer").style.display = 'none';
+};
+
+document.getElementById("drawBtn").onclick = () => {
+    document.getElementById("drawingCanvasContainer").style.display = 'block';
+    sigCtx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+    sigCtx.lineWidth = 3;
+    sigCtx.lineCap = 'round';
+    sigCtx.strokeStyle = 'black';
+    sig.style.display = 'none';
+};
+
+document.getElementById("clearSignature").onclick = () => {
+    sigCtx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+};
+
+document.getElementById("saveDrawing").onclick = () => {
+    if (!currentSignerName) {
+        alert("Por favor, volte à Etapa 2 e insira seu nome.");
+        showStep(2);
+        return;
+    }
+    
+    sig.src = signatureCanvas.toDataURL("image/png");
+    sig.style.display = 'block';
+    signatureReady = true;
+    
+    sig.style.width = "150px";
+    sig.style.height = "75px"; 
+    
+    showStep(4); 
+};
+
+document.getElementById("signatureInput").onchange = function(e) {
+    const file = e.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            sig.src = event.target.result;
+            sig.style.display = 'block';
+            signatureReady = true;
+            sig.style.width = "150px";
+            sig.style.height = "75px"; 
+            showStep(4); 
+        };
+        reader.readAsDataURL(file);
+    }
+};
+
+
+// --- LÓGICA DE DESENHO (MANTIDA) ---
+function getPoint(e) {
+    const rect = signatureCanvas.getBoundingClientRect();
+    let clientX, clientY;
+
+    if (e.touches && e.touches.length > 0) {
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
+    } else {
+        clientX = e.clientX;
+        clientY = e.clientY;
+    }
+
+    return {
+        x: clientX - rect.left,
+        y: clientY - rect.top
+    };
+}
+
+function startDrawing(e) {
+    e.preventDefault(); 
+    isDrawing = true;
+    const point = getPoint(e);
+    sigCtx.beginPath();
+    sigCtx.moveTo(point.x, point.y);
+}
+
+function draw(e) {
+    if (!isDrawing) return;
+    e.preventDefault(); 
+    const point = getPoint(e);
+    sigCtx.lineTo(point.x, point.y);
+    sigCtx.stroke();
+}
+
+function stopDrawing() {
+    if (isDrawing) {
+        sigCtx.closePath();
+        isDrawing = false;
+    }
+}
+
+signatureCanvas.addEventListener('mousedown', startDrawing);
+signatureCanvas.addEventListener('mousemove', draw);
+signatureCanvas.addEventListener('mouseup', stopDrawing);
+signatureCanvas.addEventListener('mouseout', stopDrawing);
+signatureCanvas.addEventListener('touchstart', startDrawing);
+signatureCanvas.addEventListener('touchmove', draw);
+signatureCanvas.addEventListener('touchend', stopDrawing);
+signatureCanvas.addEventListener('touchcancel', stopDrawing);
+
+
+// =================================================================
+// PONTO DE AJUSTE 1: POSICIONAMENTO NA TELA (E HABILITAÇÃO DO BOTÃO)
+// =================================================================
+
+function enableDownload() {
+    if (signatureReady && !positionSet) {
+        positionSet = true;
+        baixarBtn.disabled = false;
+        signatureStatus.textContent = "✅ Assinatura posicionada! Você pode ajustar o tamanho ou Baixar o PDF.";
+    }
+}
+
+// 1.1 MOUSE (PC)
+canvas.addEventListener('click', function(e) {
+    if(e.touches || sig.style.display === "none" || !signatureReady) return;
+    
+    if (e.offsetX !== undefined && e.offsetY !== undefined) {
+        let finalX = e.offsetX;
+        let finalY = e.offsetY;
+
+        // --- PONTO DE AJUSTE MOUSE (Valores fornecidos pelo usuário) ---
+        const offsetX_Mouse = 0;
+        const offsetY_Mouse = 0;
+        // -----------------------------
+
+        const sigWidth = sig.offsetWidth;
+        const sigHeight = sig.offsetHeight;
+
+        sig.style.left = (finalX - sigWidth / 2 + offsetX_Mouse) + "px";
+        sig.style.top = (finalY - sigHeight / 2 + offsetY_Mouse) + "px"; 
+        
+        // <<< NOVO: Habilita o download após o posicionamento
+        enableDownload(); 
+    }
+});
+
+
+// 1.2 TOQUE (CELULAR)
+canvas.addEventListener('touchstart', function(e) {
+    if(sig.style.display === "none" || !signatureReady) return;
+    
+    e.preventDefault(); 
+    
+    const touch = e.touches[0];
+    const containerRect = canvasContainer.getBoundingClientRect();
+    
+    let finalX = touch.clientX - containerRect.left;
+    let finalY = touch.clientY - containerRect.top;
+    
+    // --- PONTO DE AJUSTE TOQUE (Valores fornecidos pelo usuário) ---
+    const offsetX_Touch = 0; 
+    const offsetY_Touch = 0; 
+    // ----------------------------
+
+    const sigWidth = sig.offsetWidth;
+    const sigHeight = sig.offsetHeight;
+
+    sig.style.left = (finalX - sigWidth / 2 + offsetX_Touch) + "px";
+    sig.style.top = (finalY - sigHeight / 2 + offsetY_Touch) + "px"; 
+    
+    // <<< NOVO: Habilita o download após o posicionamento
+    enableDownload();
+});
+
+
+// === REDIMENSIONAR POR BOTÕES (ETAPA 4) ===
+function resizeSignature(factor) {
+    if(sig.style.display === "none" || !sig.naturalWidth) return;
+
+    const ratio = sig.naturalWidth / sig.naturalHeight;
+    let newWidth = sig.offsetWidth + factor * 10; 
+    
+    newWidth = Math.max(50, Math.min(500, newWidth));
+    
+    sig.style.width = newWidth + "px";
+    sig.style.height = (newWidth / ratio) + "px";
+};
+
+document.getElementById("sizeIncrease").onclick = () => resizeSignature(1);
+document.getElementById("sizeDecrease").onclick = () => resizeSignature(-1);
+
+
+// --- Renderizar PDF no canvas (CHAMADO NO INÍCIO) ---
+const pdfData = atob(pdfBase64);
+pdfjsLib.getDocument({ data: pdfData }).promise.then(pdf => {
+    pdf.getPage(1).then(page => {
+        const viewportScale = 1.4;
+        const viewport = page.getViewport({ scale: viewportScale });
+        
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        
+        pdfCanvasDimensions = { width: viewport.width, height: viewport.height, scale: viewportScale };
+        
+        const ctx = canvas.getContext("2d");
+        page.render({ canvasContext: ctx, viewport: viewport });
+        
+        // Exibe a primeira etapa após o PDF carregar
+        showStep(1); 
+    });
+});
+
+
+// === Baixar PDF assinado (PONTO DE AJUSTE 2 & 3: SALVAMENTO) ===
+document.getElementById("baixar").onclick = async function() {
+    // <<< NOVO: Verificação de obrigatoriedade
+    if(!positionSet) {
+        alert("ERRO: Você deve clicar no PDF para posicionar a assinatura antes de baixar.");
+        return;
+    }
+    // Fim da nova verificação
+
+    if(!signatureReady) {
+        alert("Por favor, carregue ou desenhe uma assinatura primeiro.");
+        return;
+    }
+    
+    if (!currentSignerName) {
+        alert("O nome do signatário está faltando. Por favor, volte à Etapa 2.");
+        showStep(2);
+        return;
+    }
+
+    const nomeFinal = currentSignerName;
+    const dateTime = new Date().toLocaleString(); 
+    
+    const pdfBytes = Uint8Array.from(atob(pdfBase64), c => c.charCodeAt(0));
+    
+    let pdfDoc;
+    try {
+        pdfDoc = await PDFLib.PDFDocument.load(pdfBytes);
+    } catch (e) {
+        alert("Erro ao carregar o PDF.");
+        return;
+    }
+
+    const page = pdfDoc.getPage(0);
+    const { width: pdfPageWidth, height: pdfPageHeight } = page.getSize();
+
+    // 1. Obter posições na tela (Pixels)
+    const containerRect = canvasContainer.getBoundingClientRect(); 
+    const sigRect = sig.getBoundingClientRect(); 
+
+    // 2. Calcular a diferença entre a posição da assinatura e o container
+    const sigRelX = sigRect.left - containerRect.left;
+    const sigRelY = sigRect.top - containerRect.top;
+    
+    // 3. Converter Coordenadas da Tela para Coordenadas do PDF (Ajuste de Escala)
+    const scaleFactor = pdfPageWidth / pdfCanvasDimensions.width;
+    
+    // Coordenadas X e Y iniciais
+    let sigX = sigRelX * scaleFactor;
+    let sigY = pdfPageHeight - ((sigRelY + sigRect.height) * scaleFactor); 
+
+    // =================================================================
+    // >>> PONTO DE AJUSTE 2: POSIÇÃO (Valores fornecidos pelo usuário) <<<
+    // =================================================================
+    const sigX_Offset_Desktop = 0; 
+    const sigY_Offset_Desktop = -20; 
+
+    const sigX_Offset_Mobile = 20; 
+    const sigY_Offset_Mobile = -410; 
+    
+    if (isMobile) {
+        sigX += sigX_Offset_Mobile;
+        sigY += sigY_Offset_Mobile;
+    } else {
+        sigX += sigX_Offset_Desktop;
+        sigY += sigY_Offset_Desktop;
+    }
+    // =================================================================
+
+    // 4. Tamanho da assinatura no PDF
+    let sigWidth = sigRect.width * scaleFactor;
+    let sigHeight = sigRect.height * scaleFactor;
+
+    // =================================================================
+    // >>> PONTO 3: AJUSTE DE TAMANHO (Valores fornecidos pelo usuário) <<<
+    // =================================================================
+    const sig_Scale_Mobile = 2.3; 
+    
+    if (isMobile) {
+        sigWidth *= sig_Scale_Mobile;
+        sigHeight *= sig_Scale_Mobile;
+    }
+    // =================================================================
+    
+    // 5. Carregar e Incorporar Imagem... (Mantido)
+    const imgDataUrl = sig.src;
+    const mimeType = imgDataUrl.substring(5, imgDataUrl.indexOf(";"));
+    let imageObject;
+
+    try {
+        if (mimeType.includes("jpeg") || mimeType.includes("jpg")) {
+            imageObject = await pdfDoc.embedJpg(imgDataUrl);
+        } else if (mimeType.includes("png")) {
+            imageObject = await pdfDoc.embedPng(imgDataUrl);
+        } else {
+            alert(`Erro: Formato de imagem '${mimeType}' não suportado.`);
+            return;
+        }
+    } catch (e) {
+        console.error("Erro ao incorporar imagem no PDF:", e);
+        alert("Falha ao processar a imagem.");
+        return;
+    }
+
+    // 6. Desenhar Assinatura e Carimbo (Mantido)
+    page.drawImage(imageObject, {
+        x: sigX,
+        y: sigY,
+        width: sigWidth,
+        height: sigHeight
+    });
+
+    const metadataText = [
+        `Assinado por: ${nomeFinal}`, 
+        `Data/Hora: ${dateTime}`
+    ];
+
+    let currentY = sigY - 15; 
+    const FONT_SIZE = 6; 
+
+    for (const line of metadataText) {
+        page.drawText(line, {
+            x: sigX,
+            y: currentY,
+            size: FONT_SIZE,
+        });
+        currentY -= 8;
+    }
+
+    // 7. Salvar e Forçar Download (Mantido)
+    const pdfFinal = await pdfDoc.save();
+    const blob = new Blob([pdfFinal], { type: "application/pdf" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = DOWNLOAD_FILENAME;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+};
+</script>
+
+</body>
+</html>
