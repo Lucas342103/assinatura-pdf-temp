@@ -1,0 +1,698 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Assinar Documento - Fluxo de Etapas</title>
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0"> 
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+
+<style>
+    /* Estilo para ocultar o conteúdo antes da senha */
+    #protected-content {
+        display: none; 
+    }
+    #password-block {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: #f8f8f8;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        flex-direction: column;
+        text-align: center;
+        z-index: 9999;
+    }
+    #password-prompt {
+        background: white;
+        padding: 40px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+    #password-input {
+        padding: 10px;
+        margin: 15px 0;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        font-size: 1.1em;
+        width: 250px;
+    }
+    .error-message {
+        color: red;
+        margin-top: 10px;
+    }
+    
+    /* Estilos do Conteúdo (Seu código existente) */
+    body {
+        font-family: Arial, sans-serif;
+        padding: 10px;
+        margin: 0;
+    }
+    .main-container {
+        max-width: 800px;
+        margin: 0 auto; 
+    }
+    .step-content {
+        margin-bottom: 20px;
+        padding: 15px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        background-color: #f9f9f9;
+        z-index: 20;
+        position: relative; 
+    }
+    /* Estilos dos botões */
+    button, #baixar, #uploadBtn, #drawBtn {
+        margin: 5px 5px 5px 0;
+        padding: 10px 20px;
+        font-size: 1em;
+        cursor: pointer;
+        border-radius: 4px;
+        border: 1px solid #0056b3;
+        background-color: #007bff;
+        color: white;
+    }
+    button:disabled, #baixar:disabled {
+        background-color: #ccc;
+        border-color: #999;
+        cursor: not-allowed;
+        color: #666;
+    }
+    .secondary-btn {
+        background-color: #f0f0f0;
+        color: #333;
+        border: 1px solid #ccc;
+    }
+    /* Estilos do PDF e Assinatura */
+    #pdfCanvas {
+        border: 1px solid #ccc;
+        width: 100%; 
+        height: auto;
+        display: block;
+        cursor: crosshair; 
+    }
+    #signature {
+        position: absolute;
+        display: none;
+        user-select: none;
+        z-index: 10;
+        pointer-events: none; 
+    }
+    #drawingCanvasContainer, #signerNameContainer {
+        padding: 15px;
+        border: 1px solid #eee;
+        border-radius: 4px;
+        margin-top: 10px;
+    }
+    #signatureCanvas {
+        border: 1px solid #000;
+        cursor: crosshair;
+        background-color: white;
+        touch-action: none; 
+        width: 100%; 
+        max-width: 300px; 
+        height: 150px;
+        display: block;
+    }
+    input[type="text"] {
+        width: 95%;
+        padding: 10px;
+        margin-top: 5px;
+        margin-bottom: 15px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+    }
+    #canvas-container {
+        position: relative;
+        padding: 0; 
+        margin-bottom: 20px;
+    }
+</style>
+</head>
+<body>
+
+<div id="password-block">
+    <div id="password-prompt">
+        <h3>Acesso Restrito ao Documento</h3>
+        <p>Por favor, digite a senha de acesso fornecida pelo remetente:</p>
+        <input type="password" id="password-input" placeholder="Digite a senha" onkeypress="handleKeyPress(event)">
+        <button onclick="attemptAccess()">Acessar Documento</button>
+        <p id="auth-error" class="error-message" style="display: none;">Senha incorreta. Tente novamente.</p>
+    </div>
+</div>
+
+<div id="protected-content">
+<div class="main-container">
+
+<h2>Processo de Assinatura Digital</h2>
+
+<div id="canvas-container">
+    <canvas id="pdfCanvas"></canvas>
+    <img id="signature" alt="Assinatura" style="display: none;">
+</div>
+<br>
+
+<div id="step1">
+    <h3>1. Iniciar Assinatura</h3>
+    <button onclick="showStep(2)">Assinar Documento</button>
+</div>
+
+<div id="step2" style="display: none;" class="step-content">
+    <h3>2. Identificação</h3>
+    <label for="signerName">Por favor, insira seu **Nome Completo** para identificação no carimbo de assinatura:</label>
+    <input type="text" id="signerName" placeholder="Seu Nome Completo">
+    <button onclick="showStep(3)" id="nextToStep3">Próximo</button>
+    <button onclick="showStep(1)" class="secondary-btn">Voltar</button>
+</div>
+
+<div id="step3" style="display: none;" class="step-content">
+    <h3>3. Escolha do Método</h3>
+    <p>Selecione como deseja gerar a assinatura:</p>
+    
+    <button id="uploadBtn">Enviar Imagem</button>
+    <button id="drawBtn">Desenhar</button>
+    <input type="file" id="signatureInput" accept="image/*" style="display: none;">
+    
+    <div id="drawingCanvasContainer" style="display: none;">
+        <h4>Desenhe sua Assinatura</h4>
+        <canvas id="signatureCanvas" width="300" height="150"></canvas><br>
+        <button id="clearSignature" class="secondary-btn">Limpar</button>
+        <button id="saveDrawing">Usar Assinatura</button>
+    </div>
+    <br>
+    <button onclick="showStep(2)" class="secondary-btn">Voltar</button>
+</div>
+
+<div id="step4" style="display: none;" class="step-content">
+    <h3>4. Posicionamento e Conclusão</h3>
+    
+    <p id="signatureStatus">Clique ou toque no PDF (acima) para posicionar a assinatura.</p>
+    
+    <div class="controls">
+        <h4>Ajustar Tamanho:</h4>
+        <button id="sizeDecrease" class="secondary-btn">- Diminuir</button>
+        <button id="sizeIncrease" class="secondary-btn">+ Aumentar</button>
+    </div>
+    
+    <button id="baixar" disabled>Baixar PDF Assinado</button> <button onclick="showStep(3)" class="secondary-btn">Voltar</button>
+
+</div>
+
+</div> 
+</div> <script>
+// =================================================================
+// LÓGICA DE PROTEÇÃO POR SENHA (Mantida)
+// =================================================================
+const CORRECT_PASSWORD = "358129"; 
+
+function attemptAccess() {
+    const enteredPassword = document.getElementById("password-input").value;
+    const errorMsg = document.getElementById("auth-error");
+
+    if (enteredPassword === CORRECT_PASSWORD) {
+        document.getElementById("password-block").style.display = "none";
+        document.getElementById("protected-content").style.display = "block";
+        loadPdf();
+    } else {
+        errorMsg.style.display = "block";
+        document.getElementById("password-input").value = ""; 
+        document.getElementById("password-input").focus();
+    }
+}
+
+function handleKeyPress(event) {
+    if (event.key === "Enter") {
+        attemptAccess();
+    }
+}
+// Fim da Lógica de Proteção
+// =================================================================
+
+
+const pdfBase64 = "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Pj4KZW5kb2JqCjExIDAgb2JqPDwvS2lkc1syIDAgUl0vVHlwZS9QYWdlcy9Db3VudCAxPj4KZW5kb2JqCjEyIDAgb2JqPDwvVHlwZS9DYXRhbG9nL1BhZ2VzIDExIDAgUj4+CmVuZG9iagoxMyAwIG9iajw8L01vZERhdGUoRDoyMDI1MTIwMjEzNTcwMS0wMycwMCcpL0NyZWF0aW9uRGF0ZShEOjIwMjUxMjAyMTM1NzAxLTAzJzAwJykvUHJvZHVjZXIoaVRleHQgMi4wLjggXChieSBsb3dhZ2llLmNvbVwpKT4+CmVuZG9iagp4cmVmCjAgMTQKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDAwIDY1NTM2IG4gCjAwMDAwMTQxODUgMDAwMDAgbiAKMDAwMDAwMDAxNSAwMDAwMCBuIAowMDAwMDAyODgwIDAwMDAwIG4gCjAwMDAwMDI5NjcgMDAwMDAgbiAKMDAwMDAwMzA1OSAwMDAwMCBuIAowMDAwMDAzMTQ5IDAwMDAwIG4gCjAwMDAwMDMyMzQgMDAwMDAgbiAKMDAwMDAxMDIzNyAwMDAwMCBuIAowMDAwMDExMTE5IDAwMDAwIG4gCjAwMDAwMTQ0MTAgMDAwMDAgbiAKMDAwMDAxNDQ2MSAwMDAwMCBuIAowMDAwMDE0NTA3IDAwMDAwIG4gCnRyYWlsZXIKPDwvSW5mbyAxMyAwIFIvSUQgWzw0YmE4ODJkYzQwZTJjNWJmNWE3ZjdiY2E3M2IyZGQ4ZD48NWRmNzFhYzA4MTg2ZTFlNTFkNDFkZTJhMmM2M2QzYjc+XS9Sb290IDEyIDAgUi9TaXplIDE0Pj4Kc3RhcnR4cmVmCjE0NjM5CiUlRU9GCg==";
+const DOWNLOAD_FILENAME = "NF Disnorte Distribuidora Norte do Parana Ltda - veic. 9854_assinado.pdf";
+const sig = document.getElementById("signature");
+const canvas = document.getElementById("pdfCanvas");
+const signatureCanvas = document.getElementById("signatureCanvas");
+const sigCtx = signatureCanvas.getContext("2d");
+const canvasContainer = document.getElementById("canvas-container");
+const baixarBtn = document.getElementById("baixar");
+const signatureStatus = document.getElementById("signatureStatus");
+
+let pdfCanvasDimensions = { width: 0, height: 0, scale: 0 }; 
+let isDrawing = false;
+let currentSignerName = ""; 
+
+const isMobile = window.innerWidth <= 768 || /Mobi|Android/i.test(navigator.userAgent);
+let signatureReady = false; 
+let positionSet = false;
+
+// Variáveis para controle de toque e rolagem
+let touchStartTime = 0;
+let startY = 0;
+const TAP_THRESHOLD_TIME = 300; 
+const TAP_THRESHOLD_DISTANCE = 10; 
+
+
+// =================================================================
+// FLUXO DE ETAPAS (Mantidas)
+// =================================================================
+
+function showStep(stepNumber) {
+    document.getElementById('step1').style.display = 'none';
+    document.getElementById('step2').style.display = 'none';
+    document.getElementById('step3').style.display = 'none';
+    document.getElementById('step4').style.display = 'none';
+    
+    const targetStep = document.getElementById('step' + stepNumber);
+    if (targetStep) {
+        targetStep.style.display = 'block';
+    }
+
+    if (stepNumber === 3) {
+        currentSignerName = document.getElementById("signerName").value.trim();
+        if (!currentSignerName) {
+            alert("Por favor, digite seu nome completo para prosseguir.");
+            showStep(2); 
+            return;
+        }
+    }
+    
+    if (stepNumber === 4) {
+        positionSet = false; 
+        baixarBtn.disabled = true; 
+
+        if (!signatureReady) {
+            signatureStatus.textContent = "Erro: Nenhuma assinatura carregada. Por favor, volte à Etapa 3.";
+        } else {
+            signatureStatus.textContent = "Assinatura pronta! Clique ou toque no PDF (acima) para **POSICIONAR** e liberar o download.";
+        }
+    }
+    
+    if (stepNumber === 1) {
+        sig.style.display = 'none';
+    }
+}
+
+// =================================================================
+// FUNÇÕES DE CONTROLE DE ASSINATURA (ETAPA 3) 
+// =================================================================
+// ... (uploadBtn e drawBtn mantidos)
+
+document.getElementById("uploadBtn").onclick = () => {
+    document.getElementById("signatureInput").click();
+    document.getElementById("drawingCanvasContainer").style.display = 'none';
+};
+
+document.getElementById("drawBtn").onclick = () => {
+    document.getElementById("drawingCanvasContainer").style.display = 'block';
+    sigCtx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+    sigCtx.lineWidth = 3;
+    sigCtx.lineCap = 'round';
+    sigCtx.strokeStyle = 'black';
+    sig.style.display = 'none';
+};
+
+document.getElementById("clearSignature").onclick = () => {
+    sigCtx.clearRect(0, 0, signatureCanvas.width, signatureCanvas.height);
+};
+
+document.getElementById("saveDrawing").onclick = () => {
+    if (!currentSignerName) {
+        alert("Por favor, volte à Etapa 2 e insira seu nome.");
+        showStep(2);
+        return;
+    }
+    
+    sig.src = signatureCanvas.toDataURL("image/png");
+    sig.style.display = 'block';
+    signatureReady = true;
+
+    // >>> NOVO AJUSTE: TAMANHO INICIAL <<<
+    if (isMobile) {
+        // Tamanho menor para celular (ex: 100px de largura)
+        sig.style.width = "100px";
+        // Mantém a proporção (calcula a altura com base na largura nativa)
+        sig.style.height = 'auto'; 
+    } else {
+        // Tamanho para PC (ex: 150px de largura)
+        sig.style.width = "150px";
+        sig.style.height = "75px"; // Usando 75px como um valor base se não houver proporção nativa
+    }
+    // >>> FIM DO NOVO AJUSTE <<<
+
+    showStep(4); 
+};
+
+document.getElementById("signatureInput").onchange = function(e) {
+    const file = e.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            sig.src = event.target.result;
+            sig.style.display = 'block';
+            signatureReady = true;
+
+            // >>> NOVO AJUSTE: TAMANHO INICIAL <<<
+            const img = new Image();
+            img.onload = function() {
+                const ratio = img.naturalWidth / img.naturalHeight;
+                let initialWidth;
+
+                if (isMobile) {
+                    initialWidth = 100; // Tamanho menor para celular
+                } else {
+                    initialWidth = 150; // Tamanho maior para PC
+                }
+
+                sig.style.width = initialWidth + "px";
+                sig.style.height = (initialWidth / ratio) + "px"; // Mantém a proporção real
+            };
+            img.src = event.target.result;
+            // >>> FIM DO NOVO AJUSTE <<<
+            
+            showStep(4); 
+        };
+        reader.readAsDataURL(file);
+    }
+};
+
+// --- LÓGICA DE DESENHO (Mantida) ---
+function getPoint(e) {
+    const rect = signatureCanvas.getBoundingClientRect();
+    let clientX, clientY;
+
+    if (e.touches && e.touches.length > 0) {
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
+    } else {
+        clientX = e.clientX;
+        clientY = e.clientY;
+    }
+
+    return {
+        x: clientX - rect.left,
+        y: clientY - rect.top
+    };
+}
+
+function startDrawing(e) {
+    e.preventDefault(); 
+    isDrawing = true;
+    const point = getPoint(e);
+    sigCtx.beginPath();
+    sigCtx.moveTo(point.x, point.y);
+}
+
+function draw(e) {
+    if (!isDrawing) return;
+    e.preventDefault(); 
+    const point = getPoint(e);
+    sigCtx.lineTo(point.x, point.y);
+    sigCtx.stroke();
+}
+
+function stopDrawing() {
+    if (isDrawing) {
+        sigCtx.closePath();
+        isDrawing = false;
+    }
+}
+
+signatureCanvas.addEventListener('mousedown', startDrawing);
+signatureCanvas.addEventListener('mousemove', draw);
+signatureCanvas.addEventListener('mouseup', stopDrawing);
+signatureCanvas.addEventListener('mouseout', stopDrawing);
+signatureCanvas.addEventListener('touchstart', startDrawing);
+signatureCanvas.addEventListener('touchmove', draw);
+signatureCanvas.addEventListener('touchend', stopDrawing);
+signatureCanvas.addEventListener('touchcancel', stopDrawing);
+
+
+// =================================================================
+// PONTO DE AJUSTE 1: POSICIONAMENTO NA TELA (Mantido)
+// =================================================================
+
+function enableDownload() {
+    if (signatureReady && !positionSet) {
+        positionSet = true;
+        baixarBtn.disabled = false;
+        signatureStatus.textContent = "✅ Assinatura posicionada! Você pode ajustar o tamanho ou Baixar o PDF.";
+    }
+}
+
+// 1.1 MOUSE (PC) - Mantido
+canvas.addEventListener('click', function(e) {
+    if(e.touches || sig.style.display === "none" || !signatureReady) return;
+    
+    if (e.offsetX !== undefined && e.offsetY !== undefined) {
+        let finalX = e.offsetX;
+        let finalY = e.offsetY;
+
+        // --- PONTO DE AJUSTE MOUSE (Valores fornecidos pelo usuário) ---
+        const offsetX_Mouse = 0;
+        const offsetY_Mouse = 0;
+        // -----------------------------
+
+        const sigWidth = sig.offsetWidth;
+        const sigHeight = sig.offsetHeight;
+
+        sig.style.left = (finalX - sigWidth / 2 + offsetX_Mouse) + "px";
+        sig.style.top = (finalY - sigHeight / 2 + offsetY_Mouse) + "px"; 
+        
+        enableDownload(); 
+    }
+});
+
+
+// 1.2 TOQUE (CELULAR) - Mantido
+canvas.addEventListener('touchstart', function(e) {
+    if(sig.style.display === "none" || !signatureReady) return;
+    
+    if (e.touches.length === 1) {
+        touchStartTime = new Date().getTime();
+        startY = e.touches[0].clientY;
+    }
+});
+
+canvas.addEventListener('touchend', function(e) {
+    if(sig.style.display === "none" || !signatureReady) return;
+    
+    const step4 = document.getElementById('step4');
+    if (!step4 || step4.style.display === 'none') return;
+    
+    const touchDuration = new Date().getTime() - touchStartTime;
+    const endY = e.changedTouches[0].clientY;
+    const distance = Math.abs(endY - startY);
+
+    if (touchDuration < TAP_THRESHOLD_TIME && distance < TAP_THRESHOLD_DISTANCE) {
+        
+        const touch = e.changedTouches[0];
+        const containerRect = canvasContainer.getBoundingClientRect();
+        
+        let finalX = touch.clientX - containerRect.left;
+        let finalY = touch.clientY - containerRect.top;
+        
+        // --- PONTO DE AJUSTE TOQUE (Valores fornecidos pelo usuário) ---
+        const offsetX_Touch = 0; 
+        const offsetY_Touch = 0; 
+        // ----------------------------
+
+        const sigWidth = sig.offsetWidth;
+        const sigHeight = sig.offsetHeight;
+
+        sig.style.left = (finalX - sigWidth / 2 + offsetX_Touch) + "px";
+        sig.style.top = (finalY - sigHeight / 2 + offsetY_Touch) + "px"; 
+        
+        enableDownload();
+        
+    }
+});
+
+
+// === REDIMENSIONAR POR BOTÕES (ETAPA 4) - Mantido ===
+function resizeSignature(factor) {
+    if(sig.style.display === "none" || !sig.naturalWidth) return;
+
+    const ratio = sig.naturalWidth / sig.naturalHeight;
+    let newWidth = sig.offsetWidth + factor * 10; 
+    
+    newWidth = Math.max(50, Math.min(500, newWidth));
+    
+    sig.style.width = newWidth + "px";
+    sig.style.height = (newWidth / ratio) + "px";
+};
+
+document.getElementById("sizeIncrease").onclick = () => resizeSignature(1);
+document.getElementById("sizeDecrease").onclick = () => resizeSignature(-1);
+
+
+// --- Renderizar PDF no canvas (CHAMADO APENAS APÓS A SENHA CORRETA) ---
+function loadPdf() {
+    const pdfData = atob(pdfBase64);
+    pdfjsLib.getDocument({ data: pdfData }).promise.then(pdf => {
+        pdf.getPage(1).then(page => {
+            const viewportScale = 1.4;
+            const viewport = page.getViewport({ scale: viewportScale });
+            
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            
+            pdfCanvasDimensions = { width: viewport.width, height: viewport.height, scale: viewportScale };
+            
+            const ctx = canvas.getContext("2d");
+            page.render({ canvasContext: ctx, viewport: viewport });
+            
+            showStep(1); 
+        });
+    });
+}
+
+// === Baixar PDF assinado (PONTO DE AJUSTE 2 & 3: SALVAMENTO) ===
+document.getElementById("baixar").onclick = async function() {
+    if(!positionSet) {
+        alert("ERRO: Você deve clicar no PDF para posicionar a assinatura antes de baixar.");
+        return;
+    }
+
+    if(!signatureReady) {
+        alert("Por favor, carregue ou desenhe uma assinatura primeiro.");
+        return;
+    }
+    
+    if (!currentSignerName) {
+        alert("O nome do signatário está faltando. Por favor, volte à Etapa 2.");
+        showStep(2);
+        return;
+    }
+
+    const nomeFinal = currentSignerName;
+    const dateTime = new Date().toLocaleString(); 
+    
+    const pdfBytes = Uint8Array.from(atob(pdfBase64), c => c.charCodeAt(0));
+    
+    let pdfDoc;
+    try {
+        pdfDoc = await PDFLib.PDFDocument.load(pdfBytes);
+    } catch (e) {
+        alert("Erro ao carregar o PDF.");
+        return;
+    }
+
+    const page = pdfDoc.getPage(0);
+    const { width: pdfPageWidth, height: pdfPageHeight } = page.getSize();
+
+    // 1. Obter posições na tela (Pixels)
+    const containerRect = canvasContainer.getBoundingClientRect(); 
+    const sigRect = sig.getBoundingClientRect(); 
+
+    // 2. Calcular a diferença entre a posição da assinatura e o container
+    const sigRelX = sigRect.left - containerRect.left;
+    const sigRelY = sigRect.top - containerRect.top;
+    
+    // 3. Converter Coordenadas da Tela para Coordenadas do PDF (Ajuste de Escala)
+    const scaleFactor = pdfPageWidth / pdfCanvasDimensions.width;
+    
+    // Coordenadas X e Y iniciais
+    let sigX = sigRelX * scaleFactor;
+    let sigY = pdfPageHeight - ((sigRelY + sigRect.height) * scaleFactor); 
+
+    // =================================================================
+    // >>> PONTO DE AJUSTE 2: POSIÇÃO (Valores fornecidos pelo usuário) <<<
+    // =================================================================
+    const sigX_Offset_Desktop = 10; 
+    const sigY_Offset_Desktop = -30; 
+
+    const sigX_Offset_Mobile = 160; 
+    const sigY_Offset_Mobile = -280; 
+    
+    if (isMobile) {
+        sigX += sigX_Offset_Mobile;
+        sigY += sigY_Offset_Mobile;
+    } else {
+        sigX += sigX_Offset_Desktop;
+        sigY += sigY_Offset_Desktop;
+    }
+    // =================================================================
+
+    // 4. Tamanho da assinatura no PDF
+    let sigWidth = sigRect.width * scaleFactor;
+    let sigHeight = sigRect.height * scaleFactor;
+
+    // =================================================================
+    // >>> PONTO 3: AJUSTE DE TAMANHO (Valores fornecidos pelo usuário) <<<
+    // =================================================================
+    const sig_Scale_Mobile = 2.0; 
+    
+    if (isMobile) {
+        sigWidth *= sig_Scale_Mobile;
+        sigHeight *= sig_Scale_Mobile;
+    }
+    // =================================================================
+    
+    // 5. Carregar e Incorporar Imagem... (Mantido)
+    const imgDataUrl = sig.src;
+    const mimeType = imgDataUrl.substring(5, imgDataUrl.indexOf(";"));
+    let imageObject;
+
+    try {
+        if (mimeType.includes("jpeg") || mimeType.includes("jpg")) {
+            imageObject = await pdfDoc.embedJpg(imgDataUrl);
+        } else if (mimeType.includes("png")) {
+            imageObject = await pdfDoc.embedPng(imgDataUrl);
+        } else {
+            alert(`Erro: Formato de imagem '${mimeType}' não suportado.`);
+            return;
+        }
+    } catch (e) {
+        console.error("Erro ao incorporar imagem no PDF:", e);
+        alert("Falha ao processar a imagem.");
+        return;
+    }
+
+    // 6. Desenhar Assinatura e Carimbo (Mantido)
+    page.drawImage(imageObject, {
+        x: sigX,
+        y: sigY,
+        width: sigWidth,
+        height: sigHeight
+    });
+
+    const metadataText = [
+        `Assinado por: ${nomeFinal}`, 
+        `Data/Hora: ${dateTime}`
+    ];
+
+    let currentY = sigY - 15; 
+    const FONT_SIZE = 6; 
+
+    for (const line of metadataText) {
+        page.drawText(line, {
+            x: sigX,
+            y: currentY,
+            size: FONT_SIZE,
+        });
+        currentY -= 8;
+    }
+
+    // 7. Salvar e Forçar Download (Mantido)
+    const pdfFinal = await pdfDoc.save();
+    const blob = new Blob([pdfFinal], { type: "application/pdf" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = DOWNLOAD_FILENAME;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+};
+</script>
+
+</body>
+</html>
